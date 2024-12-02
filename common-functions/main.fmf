@@ -1,0 +1,13 @@
+summary: Provides various yum and rpm related functions
+contact: Eva Mrakova <emrakova@redhat.com>
+component:
+  - yum
+test: ./runtest.sh
+framework: beakerlib
+require:
+  - yum
+  - createrepo
+  - rpm-build
+  - yum-utils
+duration: 5m
+enabled: true
