@@ -29,7 +29,6 @@
 # Include Beaker environment
 . /usr/share/beakerlib/beakerlib.sh || exit 1
 
-PACKAGE="yum"
 PHASE=${PHASE:-Test}
 
 rlJournalStart
@@ -49,6 +48,26 @@ rlJournalStart
     # Self test
     if [[ "$PHASE" =~ "Test" ]]; then
         rlPhaseStartTest "Test  yumlibDisableYumPlugin and yumlibYumPluginRestore"
+        if yumlibIsDnf5; then
+            PLUGIN=builddep
+            PTH=$(stat /usr/lib*/dnf5/plugins | grep "File" | cut -d: -f2)
+        rlRun "dnf --version &> ver.log"
+            if  grep "$PLUGIN" ver.log &> /dev/null; then
+                CONF=$(ls $PTH | grep $PLUGIN)
+                rlFileBackup $PTH/$CONF
+                rlRun "yumlibDisableYumPlugin $PLUGIN"
+                rlRun "dnf --version &> ver2.log" 0
+                rlAssertGrep "dnf5 version" ver2.log
+                rlAssertNotGrep "name: $PLUGIN" ver2.log
+                rlRun "yumlibYumPluginRestore"
+                rlRun "dnf --version &> ver3.log" 0
+                rlAssertGrep "dnf5 version" ver3.log
+                rlAssertGrep "name: $PLUGIN" ver3.log
+                rlFileRestore
+            else
+                rlLogWarning "$PLUGIN is not installed, I cannot run the test"
+            fi
+        else
             PLUGIN=yum-plugin-security
             if rpm -q $PLUGIN &> /dev/null; then
                 CONF=/etc/yum/pluginconf.d/security.conf
@@ -59,10 +78,12 @@ rlJournalStart
                 rlRun "yumlibYumPluginRestore"
                 rlAssertGrep 'enabled=1' $CONF
                 rlFileRestore
-	    else
-	        rlLogWarning "$PLUGIN is not installed, I cannot run the test"
-	    fi
+            else
+                rlLogWarning "$PLUGIN is not installed, I cannot run the test"
+            fi
+        fi
         rlPhaseEnd
+    fi
 #        rlPhaseStartTest "Test filename in parameter"
 #            fileCreate "parameter-file"
 #            rlAssertExists "parameter-file"
@@ -71,7 +92,6 @@ rlJournalStart
 #            FILENAME="variable-file" fileCreate
 #            rlAssertExists "variable-file"
 #        rlPhaseEnd
-    fi
 
     rlPhaseStartCleanup
         rlRun "popd"

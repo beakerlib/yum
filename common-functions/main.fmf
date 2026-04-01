@@ -1,13 +1,17 @@
-summary: Provides various yum and rpm related functions
+summary: Provides various dnf/yum and rpm related functions
 contact: Eva Mrakova <emrakova@redhat.com>
 component:
+  - dnf
   - yum
 test: ./runtest.sh
 framework: beakerlib
 require:
-  - yum
   - createrepo
   - rpm-build
+recommend:
+  - yum
+  - dnf
   - yum-utils
+  - dnf5-plugins
 duration: 5m
 enabled: true

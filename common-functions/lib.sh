@@ -26,7 +26,7 @@
 #
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #   library-prefix = yumlib
-#   library-version = 2
+#   library-version = 3
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 true <<'=cut'
@@ -41,6 +41,18 @@ yum/common-functions - Provides various yum and rpm related functions
 This library contain various functions shared across yum* and rpm* tests.
 
 =cut
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#   Helper functions (for dnf5)
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+yumlibIsDnf5() {
+    if command -v dnf5 &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #   Variables
@@ -108,35 +120,47 @@ yumlibDisableYumPlugin() {
     local RET
     local PKG
     local CONF
+    local PTH
     local REPO
     local IGNOREMISSING
+    local DNF5
     IGNOREMISSING=0
     RET=0
     if [ "$1" == "--ignoremissing" ]; then
         IGNOREMISSING=1
         shift
     fi
+    DNF5=false
+    if yumlibIsDnf5; then
+        DNF5=true
+    fi
     while [ -n "$1" ]; do
         PKG="$1"
-        if rpm -q $PKG &> /dev/null; then
-            CONF=`rpm -ql $PKG | egrep "(/etc/yum/pluginconf.d/|/etc/dnf/plugins/)" | xargs echo`
-            rlFileBackup --namespace yumlibPluginBackup $CONF
-	    rlLogInfo "Disabling plugin $PKG in $CONF"
-            sed -i 's/enabled.*=.*/enabled=0/g' $CONF || RET=2
-            # for plugin provides a repo disable also repo
-            REPO=`rpm -ql $PKG | grep '/etc/yum.repos.d/.*\.repo' | xargs echo`
-            if [ -n "$REPO" ]; then
-                if [ -f $REPO ]; then
-                    rlFileBackup --namespace yumlibPluginBackup $REPO
-                    rlLogInfo "Disabling repos in $REPO"
-                    sed -i 's/enabled.*=.*/enabled=0/g' $REPO || RET=3
-                elif [ $IGNOREMISSING == "1" ]; then
-                    rlLogInfo "Could not find repo $REPO from $PKG, ignoring"
-                else
-                    rlLogWarning "Could not find repo $REPO from $PKG"
+        if $DNF5 && grep "name: $PKG" <<< $(dnf --version); then
+                PTH=$(stat /usr/lib*/dnf5/plugins | grep "File" | cut -d: -f2)
+                CONF=$(ls $PTH | grep $PKG)
+                rlFileBackup --namespace yumlibPluginBackup $PTH/$CONF
+                rlLogInfo "Disabling plugin $PTH/$CONF"
+                rlRun "rm -f $PTH/$CONF" || RET=2
+        elif ! $DNF5 && rpm -q $PKG &> /dev/null; then
+                CONF=`rpm -ql $PKG | egrep "(/etc/yum/pluginconf.d/|/etc/dnf/plugins/)" | xargs echo`
+                rlFileBackup --namespace yumlibPluginBackup $CONF
+            rlLogInfo "Disabling plugin $PKG in $CONF"
+                sed -i 's/enabled.*=.*/enabled=0/g' $CONF || RET=2
+                # for plugin provides a repo disable also repo
+                REPO=`rpm -ql $PKG | grep '/etc/yum.repos.d/.*\.repo' | xargs echo`
+                if [ -n "$REPO" ]; then
+                    if [ -f $REPO ]; then
+                        rlFileBackup --namespace yumlibPluginBackup $REPO
+                        rlLogInfo "Disabling repos in $REPO"
+                        sed -i 's/enabled.*=.*/enabled=0/g' $REPO || RET=3
+                    elif [ $IGNOREMISSING == "1" ]; then
+                        rlLogInfo "Could not find repo $REPO from $PKG, ignoring"
+                    else
+                        rlLogWarning "Could not find repo $REPO from $PKG"
+                    fi
                 fi
-            fi
-	elif [ $IGNOREMISSING == "1" ]; then
+        elif [ $IGNOREMISSING == "1" ]; then
             rlLogInfo "Ignoring missing plugin $PKG"
         else
             rlLogWarning "No such package $PKG"
@@ -401,6 +425,11 @@ Returns 0 when the cleanup is successfull, 1 otherwise.
 
 #add parameter for cleanup of user defined repos.
 yumlibRepoCleanup(){
+  local DNF5
+  DNF5=false
+  if yumlibIsDnf5; then
+    DNF5=true
+  fi
   #If there are some files specified in arguments, proccess them
   if [[ $# > 0 ]]; then
     repos=$@
@@ -412,7 +441,11 @@ yumlibRepoCleanup(){
   do
     local NAME=$(basename $arg)
     echo \"$arg\"
-    rlRun "yum --disablerepo=\* --enablerepo=$NAME* clean all"
+    if $DNF5; then
+        rlRun "dnf --disablerepo=\* --enablerepo=$NAME* clean all"
+    else
+        rlRun "yum --disablerepo=\* --enablerepo=$NAME* clean all"
+    fi
     if [ -d "$arg" ]; then
       rm -rf $arg
       rlLogInfo "deleting $arg"
@@ -660,7 +693,7 @@ yumlibLibraryLoaded() {
         rm -f /var/tmp/yumlibRepoSetupLocal.repos
         rlLogInfo "One of previously running tests didn't call yumlibRepoCleanup() function"
     fi
-    rpm -q rpm yum yum-utils 
+    rpm -q yum yum-utils || rpm -q dnf5 dnf5-plugins
     touch /var/tmp/yumlibLoaded || return 1
     return 0
 }
@@ -680,6 +713,7 @@ true <<'=cut'
 
 Karel Srot <ksrot@redhat.com>
 Marek Marusic <mmarusic@redhat.com>
+Eva Mrakova <emrakova@redhat.com>
 
 =back
 
